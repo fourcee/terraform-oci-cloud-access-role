@@ -1,13 +1,13 @@
 # terraform-oci-cloud-access-role
 
-A Terraform module for deploying OCI IAM policy assignments. This module allows you to create IAM policies and assign both predefined and custom policy statements to group principals at either the compartment or tenancy level.
+A Terraform module for deploying OCI IAM policy assignments. This module creates a single OCI IAM policy from statement templates and expands those templates across group principals, OCI users, and OCI dynamic groups.
 
 ## Features
 
-- Assign predefined OCI policy statements to group principals
-- Create named custom policy groups with specific statements
-- Support for both compartment-level and tenancy-level IAM assignments
-- Automatic expansion of policy templates across multiple groups
+- Assign OCI policy statement templates to group principals
+- Assign OCI policy statement templates to typed OCI users and dynamic groups
+- Support for compartment-level or tenancy-level policy scopes
+- Automatic expansion of policy templates across multiple principals
 
 ## Usage
 
@@ -19,22 +19,13 @@ See the [examples directory](./examples) for complete usage examples.
 module "iam_assignment" {
   source = "github.com/fourcee/terraform-oci-cloud-access-role"
 
-  compartment_id = "ocid1.compartment.oc1..exampleid"
+  policy_name           = "dev-access"
+  policy_compartment_id = "ocid1.compartment.oc1..exampleid"
+  policy_scope          = "compartment dev"
 
-  predefined_policies = [
-    "Allow group {group} to read all-resources in compartment dev",
-    "Allow group {group} to use instances in compartment dev"
-  ]
-
-  custom_policies = [
-    {
-      name        = "custom-app-policy"
-      description = "Custom policy for application-specific permissions"
-      statements = [
-        "Allow group {group} to manage objects in compartment dev where target.bucket.name='app-data'",
-        "Allow group {group} to manage load-balancers in compartment dev"
-      ]
-    }
+  policy_statement_templates = [
+    "Allow group {group} to read all-resources in {scope}",
+    "Allow group {group} to use instances in {scope}"
   ]
 
   group_principals = [
@@ -44,31 +35,31 @@ module "iam_assignment" {
 }
 ```
 
-### Tenancy-Level IAM Assignment
+### Typed OCI Principal Assignment
 
 ```hcl
 module "iam_assignment" {
   source = "github.com/fourcee/terraform-oci-cloud-access-role"
 
-  tenancy_id = "ocid1.tenancy.oc1..exampleid"
+  policy_name           = "typed-principal-access"
+  policy_compartment_id = "ocid1.tenancy.oc1..exampleid"
+  policy_scope          = "tenancy"
 
-  predefined_policies = [
-    "Allow group {group} to inspect compartments in tenancy"
+  policy_statement_templates = [
+    "Allow {principal} to read all-resources in {scope}"
   ]
 
-  custom_policies = [
+  oci_principals = [
     {
-      name        = "tenancy-custom-policy"
-      description = "Custom policy for tenancy-level permissions"
-      statements = [
-        "Allow group {group} to manage compartments in tenancy",
-        "Allow group {group} to manage policies in tenancy"
-      ]
+      type                 = "user"
+      name                 = "alice@example.com"
+      identity_domain_name = "Default"
+    },
+    {
+      type                 = "dynamic_group"
+      name                 = "instance-workers"
+      identity_domain_name = "Default"
     }
-  ]
-
-  group_principals = [
-    "TenancyAdmins"
   ]
 }
 ```
@@ -90,27 +81,29 @@ module "iam_assignment" {
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| predefined_policies | List of OCI policy statement templates to assign. Use {group} as placeholder. | `list(string)` | `[]` | no |
-| custom_policies | List of custom OCI policy groups to create and assign | <pre>list(object({<br>  name        = string<br>  description = string<br>  statements  = list(string)<br>}))</pre> | `[]` | no |
-| group_principals | List of OCI group names to assign policies to | `list(string)` | `[]` | no |
-| compartment_id | The OCI compartment OCID to assign policies at. Must provide either compartment_id or tenancy_id. | `string` | `null` | no |
-| tenancy_id | The OCI tenancy OCID to assign policies at. Must provide either compartment_id or tenancy_id. | `string` | `null` | no |
+| policy_name | OCI IAM policy name. | `string` | n/a | yes |
+| policy_description | OCI IAM policy description. | `string` | `"Managed by Helix Cloud Access Roles"` | no |
+| policy_freeform_tags | Freeform tags to apply to the OCI IAM policy. | `map(string)` | `{}` | no |
+| policy_compartment_id | Compartment OCID where the OCI IAM policy is created. Use the tenancy OCID for tenancy-level policies. | `string` | n/a | yes |
+| policy_scope | Scope text used to replace `{scope}` in policy statement templates, such as `compartment dev` or `tenancy`. | `string` | n/a | yes |
+| policy_statement_templates | List of OCI policy statement templates to render. Use `{group}`, `{principal}`, and `{scope}` placeholders. | `list(string)` | n/a | yes |
+| group_principals | List of OCI group names to assign policies to. | `list(string)` | `[]` | no |
+| oci_principals | List of typed OCI principals to assign policies to. Supported types are `user` and `dynamic_group`. | <pre>list(object({<br>  type                 = string<br>  name                 = string<br>  identity_domain_name = string<br>}))</pre> | `[]` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| policy_ids | Map of policy keys to their OCIDs |
-| policy_names | Map of policy keys to their names |
-| assigned_policies | List of all policy statement templates that have been assigned |
-| assigned_principals | List of all principals that have been assigned policies |
+| policy_id | OCID of the created OCI IAM policy |
+| policy_statements | Rendered OCI IAM policy statements |
 
 ## Notes
 
-- You must provide either `compartment_id` or `tenancy_id`, but not both
+- Use the tenancy OCID as `policy_compartment_id` for tenancy-level policies
 - Policy statement templates use `{group}` as a placeholder that gets replaced with each group principal name
+- Policy statement templates use `{principal}` as a placeholder for typed OCI principals. Users render as `user <identity_domain_name>/<name>` and dynamic groups render as `dynamic-group <identity_domain_name>/<name>`
 - Group principals should be OCI group names (e.g., `Developers`), not OCIDs
-- Predefined policies should use full OCI policy syntax (e.g., `Allow group {group} to read all-resources in compartment dev`)
+- Policy statement templates should use full OCI policy syntax (e.g., `Allow group {group} to read all-resources in {scope}`)
 
 ## License
 

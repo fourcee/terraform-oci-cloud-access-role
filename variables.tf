@@ -26,5 +26,22 @@ variable "policy_statement_templates" {
 }
 
 variable "group_principals" {
-  type = list(string)
+  type    = list(string)
+  default = []
+}
+
+variable "oci_principals" {
+  type = list(object({
+    type                 = string # user | dynamic_group
+    name                 = string
+    identity_domain_name = string
+  }))
+  default = []
+
+  validation {
+    condition = alltrue([
+      for principal in var.oci_principals : contains(["user", "dynamic_group"], principal.type)
+    ])
+    error_message = "Each OCI principal type must be either \"user\" or \"dynamic_group\"."
+  }
 }
